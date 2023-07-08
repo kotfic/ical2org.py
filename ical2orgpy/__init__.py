@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import os
 import sys
 import traceback
 from datetime import date, datetime, timedelta, time
@@ -64,7 +65,10 @@ class Convertor():
 
         self.env = Environment(
             loader=PackageLoader("ical2orgpy"),
-            autoescape=select_autoescape())
+            autoescape=select_autoescape(),
+            keep_trailing_newline=True
+        )
+        self.header_template = self.env.get_template('header.j2')
         self.entry_template = self.env.get_template("entry.j2")
 
     def __call__(self, ics_file, org_file):
@@ -78,6 +82,18 @@ class Convertor():
         now = datetime.now(utc)
         start = now - timedelta(days=self.days)
         end = now + timedelta(days=self.days)
+
+        org_file.write(
+            self.header_template.render(**{
+                "title": os.environ.get("TITLE", None),
+                "author": os.environ.get("AUTHOR", None),
+                "email": os.environ.get("EMAIL", None),
+                "description": os.environ.get("DESCRIPTION", None),
+                "category": os.environ.get("CATEGORY", None),
+                "filetags": os.environ.get("FILETAGS", None),
+                "created": now.astimezone(self.tz).strftime("[%Y-%m-%d %a %H:%M]")
+            })
+        )
 
         for comp in recurring_ical_events.of(
                 cal, keep_recurrence_attributes=True).between(start, end):

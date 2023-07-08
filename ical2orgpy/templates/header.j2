@@ -1,0 +1,25 @@
+{% if title -%}
+#+TITLE:       {{ title }}
+{% endif -%}
+{% if author -%}
+#+AUTHOR:      {{ author }}
+{% endif -%}
+{% if email -%}
+#+EMAIL:       {{ email }}
+{% endif -%}
+{% if description -%}
+#+DESCRIPTION: {{ description }}
+{% endif -%}
+{% if category -%}
+#+CATEGORY:    {{ category }}
+{% endif -%}
+#+STARTUP:     hidestars
+#+STARTUP:     overview
+{% if filetags -%}
+#+FILETAGS:    {{ filetags }}
+{% endif -%}
+{% if created -%}
+#+CREATED:     {{ created }}
+{% endif %}
+
+
