@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, time
 import click
 import recurring_ical_events
 from icalendar import Calendar
+from jinja2 import Environment, PackageLoader, select_autoescape
 from pytz import all_timezones, timezone, utc
 from tzlocal import get_localzone
 
@@ -44,7 +45,7 @@ class IcalError(Exception):
 
 
 class Convertor():
-    RECUR_TAG = ":RECURRING:"
+    RECUR_TAG = "RECURRING"
 
     # Do not change anything below
 
@@ -61,7 +62,13 @@ class Convertor():
         self.include_location = include_location
         self.continue_on_error = continue_on_error
 
+        self.env = Environment(
+            loader=PackageLoader("ical2orgpy"),
+            autoescape=select_autoescape())
+        self.entry_template = self.env.get_template("entry.j2")
+
     def __call__(self, ics_file, org_file):
+        #  import pudb; pu.db
         try:
             cal = Calendar.from_ical(ics_file.read())
         except ValueError as e:
@@ -71,11 +78,12 @@ class Convertor():
         now = datetime.now(utc)
         start = now - timedelta(days=self.days)
         end = now + timedelta(days=self.days)
+
         for comp in recurring_ical_events.of(
-            cal, keep_recurrence_attributes=True
-        ).between(start, end):
+                cal, keep_recurrence_attributes=True).between(start, end):
             if event_is_declined(comp, self.emails):
                 continue
+
             try:
                 org_file.write(self.create_entry(comp))
             except Exception:
@@ -86,33 +94,43 @@ class Convertor():
                 else:
                     raise
 
-    def create_entry(self, comp):
-        output = []
-        summary = None
+
+    def _get_summary(self, comp):
+        summary = u"(No Title)"
+
         if "SUMMARY" in comp:
             summary = comp['SUMMARY'].to_ical().decode("utf-8")
             summary = summary.replace('\\,', ',')
+
+        return summary
+
+    def _get_location(self, comp):
         location = None
         if "LOCATION" in comp:
             location = comp['LOCATION'].to_ical().decode("utf-8")
             location = location.replace('\\,', ',')
-        if not any((summary, location)):
-            summary = u"(No title)"
-        else:
-            summary += " - " + location if location and self.include_location else ''
-        rec_event = "RRULE" in comp
+
+        return location
+
+    def _get_description(self, comp):
         description = None
         if 'DESCRIPTION' in comp:
             description = '\n'.join(comp['DESCRIPTION'].to_ical()
                                     .decode("utf-8").split('\\n'))
             description = description.replace('\\,', ',')
 
-        output.append(u"* {}".format(summary))
-        if rec_event and self.RECUR_TAG:
-            output.append(u" {}".format(self.RECUR_TAG))
-        output.append(u"\n")
+        return description
 
+    def _get_tags(self, comp):
+        tags = []
+        if "RRULE" in comp and self.RECUR_TAG:
+            tags.append(self.RECUR_TAG)
+
+        return ":".join(tags)
+
+    def _get_date_string(self, comp):
         # Get start/end/duration
+        date_string = None
         ev_start = None
         ev_end = None
         duration = None
@@ -137,26 +155,31 @@ class Convertor():
         # Format date/time appropriately
         if isinstance(ev_start, datetime):
             # Normal event with start and end
-            output.append("  {}--{}\n".format(
-                org_datetime(ev_start, self.tz), org_datetime(ev_end, self.tz)
-                ))
+            date_string = "{}--{}".format(
+                org_datetime(ev_start, self.tz),
+                org_datetime(ev_end, self.tz))
+
         elif isinstance(ev_start, date):
             if ev_start == ev_end - timedelta(days=1):
                 # single day event
-                output.append("  {}\n".format(org_date(ev_start, self.tz)))
+                date_string = "{}".format(org_date(ev_start, self.tz))
             else:
                 # multiple day event
-                output.append(
-                    "  {}--{}\n".format(
-                        org_date(ev_start, self.tz),
-                        org_date(ev_end - timedelta(days=1), self.tz),
-                    ))
+                date_string = "{}--{}".format(
+                    org_date(ev_start, self.tz),
+                    org_date(ev_end - timedelta(days=1), self.tz))
 
-        if description:
-            output.append(u"{}\n".format(description))
-        output.append(u"\n")
-        return ''.join(output)
+        return date_string
 
+    def create_entry(self, comp):
+        template_vars = {
+            "summary": self._get_summary(comp),
+            "location": self._get_location(comp),
+            "tags": self._get_tags(comp),
+            "date_string": self._get_date_string(comp),
+            "description": self._get_description(comp)
+        }
+        return self.entry_template.render(**template_vars)
 
 def check_timezone(ctx, param, value):
     if (value is None) or (value in all_timezones):
